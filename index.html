@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anthropic Job Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; height: 100vh; background: #fff; color: #1a1a1a; }
+  body.dark { background: #1a1a1a; color: #f0f0f0; }
+
+  /* Sidebar */
+  #sidebar { width: 260px; border-right: 1px solid #e5e5e5; display: flex; flex-direction: column; padding: 16px; gap: 8px; }
+  body.dark #sidebar { border-color: #333; }
+  #sidebar h2 { font-size: 14px; font-weight: 600; color: #666; margin-bottom: 4px; }
+  body.dark #sidebar h2 { color: #999; }
+  #new-chat-btn { padding: 10px; background: #000; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  body.dark #new-chat-btn { background: #fff; color: #000; }
+  #conv-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .conv-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; justify-content: space-between; align-items: center; }
+  .conv-item:hover { background: #f5f5f5; }
+  body.dark .conv-item:hover { background: #2a2a2a; }
+  .conv-item.active { background: #f0f0f0; }
+  body.dark .conv-item.active { background: #2a2a2a; }
+  .conv-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .delete-btn { opacity: 0; font-size: 16px; color: #999; background: none; border: none; cursor: pointer; padding: 0 4px; }
+  .conv-item:hover .delete-btn { opacity: 1; }
+
+  /* Main */
+  #main { flex: 1; display: flex; flex-direction: column; }
+  #topbar { padding: 16px 24px; border-bottom: 1px solid #e5e5e5; display: flex; justify-content: space-between; align-items: center; }
+  body.dark #topbar { border-color: #333; }
+  #topbar h1 { font-size: 16px; font-weight: 600; }
+  #dark-toggle { padding: 6px 12px; border: 1px solid #e5e5e5; border-radius: 6px; background: none; cursor: pointer; font-size: 13px; }
+  body.dark #dark-toggle { border-color: #444; color: #f0f0f0; }
+
+  /* Messages */
+  #messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 75%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+  .msg.user { background: #000; color: #fff; align-self: flex-end; border-radius: 12px 12px 2px 12px; }
+  body.dark .msg.user { background: #fff; color: #000; }
+  .msg.assistant { background: #f5f5f5; align-self: flex-start; border-radius: 12px 12px 12px 2px; }
+  body.dark .msg.assistant { background: #2a2a2a; }
+  .msg.thinking { color: #999; font-style: italic; background: transparent; padding: 4px 0; }
+
+  /* Empty state */
+  #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #999; }
+  #empty h2 { font-size: 20px; font-weight: 600; color: #1a1a1a; }
+  body.dark #empty h2 { color: #f0f0f0; }
+  #empty p { font-size: 14px; text-align: center; max-width: 400px; }
+  .suggestion { padding: 10px 16px; border: 1px solid #e5e5e5; border-radius: 8px; cursor: pointer; font-size: 13px; color: #1a1a1a; background: none; text-align: left; }
+  body.dark .suggestion { border-color: #444; color: #f0f0f0; }
+  .suggestion:hover { background: #f5f5f5; }
+  body.dark .suggestion:hover { background: #2a2a2a; }
+
+  /* Input */
+  #input-area { padding: 16px 24px; border-top: 1px solid #e5e5e5; display: flex; gap: 12px; }
+  body.dark #input-area { border-color: #333; }
+  #input { flex: 1; padding: 12px 16px; border: 1px solid #e5e5e5; border-radius: 10px; font-size: 14px; outline: none; resize: none; font-family: inherit; background: #fff; color: #1a1a1a; }
+  body.dark #input { background: #2a2a2a; border-color: #444; color: #f0f0f0; }
+  #input:focus { border-color: #000; }
+  body.dark #input:focus { border-color: #fff; }
+  #send-btn { padding: 12px 20px; background: #000; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  body.dark #send-btn { background: #fff; color: #000; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <button id="new-chat-btn">+ New Chat</button>
+  <button id="prep-btn" style="padding:10px;background:#000;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
+    🎯 Prep Me For Interview
+  </button>
+  <button id="briefing-btn" style="padding:10px;background:#f0f0f0;color:#1a1a1a;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:space-between;">
+    Morning Briefing <span id="badge" style="display:none;background:#ff4444;color:white;border-radius:10px;padding:2px 7px;font-size:11px;">0</span>
+  </button>
+  <h2>Recent</h2>
+  <div id="conv-list"></div>
+</div>
+<div id="main">
+  <div id="topbar">
+    <h1>Anthropic Job Agent</h1>
+    <button id="dark-toggle">Dark Mode</button>
+  </div>
+  <div id="messages">
+    <div id="empty">
+      <h2>What do you want to know?</h2>
+      <p>Ask me anything about the Anthropic Technical Evangelist role, hackathons, interviews, or recruiters.</p>
+      <button class="suggestion" onclick="ask('What does the Anthropic Technical Evangelist role involve day to day?')">What does this role involve day to day?</button>
+      <button class="suggestion" onclick="ask('Who are the recruiters at Anthropic hiring for the Technical Evangelist role?')">Who are the recruiters for this role?</button>
+      <button class="suggestion" onclick="ask('What questions does Anthropic ask in interviews for developer relations roles?')">What do they ask in interviews?</button>
+      <button class="suggestion" onclick="ask('What industries attend Anthropic hackathons?')">What industries attend hackathons?</button>
+    </div>
+  </div>
+  <div id="input-area">
+    <textarea id="input" rows="1" placeholder="Ask anything about the role..."></textarea>
+    <button id="send-btn">Send</button>
+  </div>
+</div>
+
+<script>
+  let currentConvId = null;
+  let isLoading = false;
+
+  // Dark mode
+  document.getElementById('dark-toggle').onclick = () => {
+    document.body.classList.toggle('dark');
+    document.getElementById('dark-toggle').textContent = document.body.classList.contains('dark') ? 'Light Mode' : 'Dark Mode';
+  };
+
+  // Load conversations
+  async function loadConversations() {
+    const res = await fetch('/conversations');
+    const convs = await res.json();
+    const list = document.getElementById('conv-list');
+    list.innerHTML = '';
+    convs.forEach(c => {
+      const div = document.createElement('div');
+      div.className = 'conv-item' + (c.id === currentConvId ? ' active' : '');
+      div.innerHTML = `<span class="conv-title">${c.title}</span><button class="delete-btn" onclick="deleteConv(${c.id}, event)">×</button>`;
+      div.onclick = () => loadConversation(c.id);
+      list.appendChild(div);
+    });
+  }
+
+  async function loadConversation(id) {
+    currentConvId = id;
+    const res = await fetch(`/conversations/${id}/messages`);
+    const msgs = await res.json();
+    const container = document.getElementById('messages');
+    container.innerHTML = '';
+    msgs.forEach(m => addMessage(m.role, m.content));
+    loadConversations();
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function deleteConv(id, e) {
+    e.stopPropagation();
+    await fetch(`/conversations/${id}`, { method: 'DELETE' });
+    if (currentConvId === id) {
+      currentConvId = null;
+      document.getElementById('messages').innerHTML = document.getElementById('empty') ? '' : '';
+      location.reload();
+    }
+    loadConversations();
+  }
+
+  function addMessage(role, content) {
+    const empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    const container = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.textContent = content;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+  }
+
+  async function ask(question) {
+    document.getElementById('input').value = question;
+    await sendMessage();
+  }
+
+  async function sendMessage() {
+    if (isLoading) return;
+    const input = document.getElementById('input');
+    const message = input.value.trim();
+    if (!message) return;
+
+    isLoading = true;
+    input.value = '';
+    document.getElementById('send-btn').disabled = true;
+
+    addMessage('user', message);
+
+    const thinking = addMessage('thinking', 'Researching...');
+    
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: currentConvId, message })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let assistantDiv = null;
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.conv_id) {
+            currentConvId = data.conv_id;
+            loadConversations();
+          }
+          if (data.text) {
+            if (!assistantDiv) {
+              thinking.remove();
+              assistantDiv = addMessage('assistant', '');
+            }
+            fullText += data.text;
+            assistantDiv.innerHTML = marked.parse(fullText);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+          }
+          if (data.done) {
+            isLoading = false;
+            document.getElementById('send-btn').disabled = false;
+            loadConversations();
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  // New chat
+  document.getElementById('new-chat-btn').onclick = () => {
+    currentConvId = null;
+    document.getElementById('messages').innerHTML = '';
+    location.reload();
+  };
+
+  // Send on Enter
+  document.getElementById('input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // Send button
+  document.getElementById('send-btn').onclick = sendMessage;
+
+  document.getElementById('prep-btn').onclick = async () => {
+    const background = prompt("Briefly describe your background (2-3 sentences):");
+    if (!background) return;
+    const empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    const container = document.getElementById('messages');
+    container.innerHTML = '';
+    addMessage('user', 'Prep me for my Anthropic interview');
+    const thinking = addMessage('thinking', '3 agents are working on your prep document... this takes 1-2 minutes...');
+    try {
+      const res = await fetch('/interview-prep', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({background})
+      });
+      
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.progress) {
+              thinking.textContent = data.progress;
+            }
+            if (data.document) {
+              thinking.remove();
+              addMessage('assistant', data.document);
+            }
+            if (data.error) {
+              thinking.remove();
+              addMessage('assistant', 'Error: ' + data.error);
+            }
+          } catch(e) {}
+        }
+      }
+    } catch(e) {
+      thinking.remove();
+      addMessage('assistant', 'Error generating prep document.');
+    }
+  };
+
+  // Init
+  loadConversations();
+  checkBriefing();
+
+  async function checkBriefing() {
+    try {
+      const res = await fetch('/briefing/count');
+      const data = await res.json();
+      if (data.unseen > 0) {
+        document.getElementById('badge').style.display = 'inline';
+        document.getElementById('badge').textContent = data.unseen;
+      }
+    } catch(e) {}
+  }
+
+  document.getElementById('briefing-btn').onclick = async () => {
+    const empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    const container = document.getElementById('messages');
+    container.innerHTML = '';
+    const thinking = addMessage('thinking', 'Generating morning briefing...');
+    try {
+      const res = await fetch('/briefing');
+      const data = await res.json();
+      thinking.remove();
+      addMessage('assistant', data.briefing);
+      document.getElementById('badge').style.display = 'none';
+    } catch(e) {
+      thinking.remove();
+      addMessage('assistant', 'Error loading briefing.');
+    }
+  };
+</script>
+</body>
+</html>
