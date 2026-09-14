@@ -1,0 +1,6 @@
+chats.db
+__pycache__/
+.venv/
+fix_markdown.py
+*.pyc
+.env
