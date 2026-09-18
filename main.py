@@ -5,7 +5,7 @@ import webbrowser
 import threading
 from datetime import datetime
 from anthropic import Anthropic
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -32,6 +32,37 @@ SYSTEM_PROMPT = """You are a job intelligence agent helping someone apply for th
 class MessageRequest(BaseModel):
     conversation_id: Optional[int] = None
     message: str
+
+
+def search_chat_history(query: str, limit: int = 5) -> str:
+    """Search past conversations for relevant context"""
+    conn = get_db()
+    keywords = [w.lower() for w in query.split() if len(w) > 3]
+    if not keywords:
+        return ""
+    
+    conditions = " OR ".join([f"LOWER(content) LIKE ?" for _ in keywords])
+    params = [f"%{kw}%" for kw in keywords]
+    
+    rows = conn.execute(f"""
+        SELECT role, content, created_at 
+        FROM messages 
+        WHERE ({conditions})
+        AND role IN ('user', 'assistant')
+        ORDER BY created_at DESC
+        LIMIT ?
+    """, params + [limit]).fetchall()
+    conn.close()
+    
+    if not rows:
+        return ""
+    
+    context = "\n\n=== RELEVANT PAST CONVERSATIONS ===\n"
+    for row in rows:
+        role = "You" if row["role"] == "user" else "Agent"
+        context += f"{role}: {row['content'][:500]}\n---\n"
+    context += "=== END OF PAST CONVERSATIONS ===\n\n"
+    return context
 
 def get_db():
     conn = sqlite3.connect("chats.db")
@@ -160,9 +191,20 @@ def get_unseen_count():
 @app.post("/interview-prep")
 def interview_prep(req: dict):
     from agents import run_interview_prep_pipeline
+    from profile import profile_to_context, init_profile_db
     import json as json2
     import threading
+    init_profile_db()
     background = req.get("background", "")
+    # Only use profile for interview prep - no RAG to avoid hallucination
+    from profile import get_profile
+    profile = get_profile()
+    profile_parts = []
+    if profile.get("cover_letter"):
+        profile_parts.append(f"Cover Letter:\n{profile['cover_letter']}")
+    if profile.get("github_repos"):
+        profile_parts.append(f"GitHub Repos:\n{profile['github_repos']}")
+    full_background = "\n\n".join(profile_parts) + "\n\n" + background if profile_parts else background
     progress_list = []
     result_box = {}
     error_box = {}
@@ -172,7 +214,7 @@ def interview_prep(req: dict):
 
     def run():
         try:
-            result_box["r"] = run_interview_prep_pipeline(background, callback)
+            result_box["r"] = run_interview_prep_pipeline(full_background, callback)
         except Exception as e:
             error_box["e"] = str(e)
 
@@ -192,6 +234,41 @@ def interview_prep(req: dict):
             yield "data: " + json2.dumps({"document": result_box["r"]["document"]}) + "\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/profile")
+def get_profile_route():
+    from profile import get_profile, init_profile_db
+    init_profile_db()
+    return get_profile()
+
+@app.post("/profile/repos")
+def save_repos(req: dict):
+    from profile import save_profile, init_profile_db
+    init_profile_db()
+    save_profile(github_repos=req.get("repos", ""))
+    return {"status": "saved"}
+
+@app.post("/profile/cover-letter")
+def save_cover_letter(req: dict):
+    from profile import save_profile, init_profile_db
+    init_profile_db()
+    save_profile(cover_letter=req.get("cover_letter", ""))
+    return {"status": "saved"}
+
+@app.post("/profile/resume")
+async def save_resume(request: Request):
+    from profile import save_profile, init_profile_db
+    import base64
+    init_profile_db()
+    form = await request.form()
+    file = form.get("file")
+    if file:
+        contents = await file.read()
+        b64 = base64.b64encode(contents).decode("utf-8")
+        save_profile(resume_filename=file.filename, resume_base64=b64)
+        return {"status": "saved", "filename": file.filename}
+    return {"status": "error", "message": "No file provided"}
 
 if __name__ == "__main__":
     import uvicorn

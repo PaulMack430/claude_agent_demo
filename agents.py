@@ -43,7 +43,7 @@ def writer_agent(research: str, strategy: str, progress_callback=None) -> str:
         progress_callback("✍️ Writer Agent: Creating your interview prep document...")
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system="You are a professional career coach. Create a polished comprehensive interview prep document with talking points, stories to tell, questions to ask, and a one-page summary for the night before.",
         messages=[{"role": "user", "content": f"Research:\n{research}\n\nStrategy:\n{strategy}\n\nWrite a comprehensive interview prep document."}]
     )

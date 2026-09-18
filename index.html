@@ -75,6 +75,18 @@
   <button id="briefing-btn" style="padding:10px;background:#f0f0f0;color:#1a1a1a;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:space-between;">
     Morning Briefing <span id="badge" style="display:none;background:#ff4444;color:white;border-radius:10px;padding:2px 7px;font-size:11px;">0</span>
   </button>
+  <h2>My Profile</h2>
+  <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
+    <label style="font-size:12px;color:#666;">Resume (PDF)</label>
+    <input type="file" id="resume-upload" accept=".pdf" style="font-size:12px;">
+    <span id="resume-status" style="font-size:11px;color:#999;"></span>
+    <label style="font-size:12px;color:#666;margin-top:6px;">GitHub Repos (one per line)</label>
+    <textarea id="repos-input" rows="3" placeholder="https://github.com/you/repo1" style="font-size:12px;padding:6px;border:1px solid #e5e5e5;border-radius:6px;resize:none;font-family:inherit;"></textarea>
+    <label style="font-size:12px;color:#666;margin-top:6px;">Cover Letter</label>
+    <textarea id="cover-letter-input" rows="4" placeholder="Paste your cover letter here..." style="font-size:12px;padding:6px;border:1px solid #e5e5e5;border-radius:6px;resize:none;font-family:inherit;"></textarea>
+    <button id="save-profile-btn" style="padding:8px;background:#000;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save Profile</button>
+    <span id="profile-status" style="font-size:11px;color:#999;"></span>
+  </div>
   <h2>Recent</h2>
   <div id="conv-list"></div>
 </div>
@@ -285,6 +297,39 @@
       addMessage('assistant', 'Error generating prep document.');
     }
   };
+
+  // Profile
+  async function loadProfile() {
+    const res = await fetch('/profile');
+    const profile = await res.json();
+    if (profile.github_repos) document.getElementById('repos-input').value = profile.github_repos;
+    if (profile.cover_letter) document.getElementById('cover-letter-input').value = profile.cover_letter;
+    if (profile.resume_filename) document.getElementById('resume-status').textContent = '✅ ' + profile.resume_filename;
+  }
+
+  document.getElementById('resume-upload').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('resume-status').textContent = 'Uploading...';
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/profile/resume', {method: 'POST', body: form});
+    const data = await res.json();
+    if (data.status === 'saved') {
+      document.getElementById('resume-status').textContent = '✅ ' + data.filename;
+    }
+  };
+
+  document.getElementById('save-profile-btn').onclick = async () => {
+    const repos = document.getElementById('repos-input').value;
+    const coverLetter = document.getElementById('cover-letter-input').value;
+    await fetch('/profile/repos', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repos})});
+    await fetch('/profile/cover-letter', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cover_letter: coverLetter})});
+    document.getElementById('profile-status').textContent = '✅ Saved!';
+    setTimeout(() => document.getElementById('profile-status').textContent = '', 3000);
+  };
+
+  loadProfile();
 
   // Init
   loadConversations();
